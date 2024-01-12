@@ -1,61 +1,95 @@
-//
-//  ContentView.swift
-//  ToDoList
-//
-//  Created by Ярослав on 07.01.2024.
-//
-
 import SwiftUI
 import SwiftData
 
-struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+struct Task: Codable, Identifiable {
+    var id = UUID()
+    var title: String
+    var isCompleted = false
+}
 
-    var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-        } detail: {
-            Text("Select an item")
+class TaskStore: ObservableObject {
+    @Published var tasks = [Task]()
+    
+    init() {
+        if let savedTasks = UserDefaults.standard.data(forKey: "tasks"),
+           let decodedTasks = try? JSONDecoder().decode([Task].self, from: savedTasks) {
+            tasks = decodedTasks
         }
     }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
+    
+    func addTask(title: String) {
+        guard !title.isEmpty else { return }
+        
+        let newTask = Task(title: title)
+        tasks.append(newTask)
+        saveTasks()
+    }
+    
+    func removeTask(at offsets: IndexSet) {
+        tasks.remove(atOffsets: offsets)
+        saveTasks()
+    }
+    
+    func toggleTaskCompletion(task: Task) {
+        if let index = tasks.firstIndex(where: { $0.id == task.id }) {
+            tasks[index].isCompleted.toggle()
+            saveTasks()
         }
     }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
+    
+    private func saveTasks() {
+        if let encodedTasks = try? JSONEncoder().encode(tasks) {
+            UserDefaults.standard.set(encodedTasks, forKey: "tasks")
         }
     }
 }
 
-#Preview {
-    ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+struct ContentView: View {
+    @ObservedObject var taskStore = TaskStore()
+    @State private var newTaskTitle = ""
+    
+    var body: some View {
+        NavigationView {
+            List {
+                Section(header: Text("Новая задача")) {
+                    HStack {
+                        TextField("Введите новую задачу", text: $newTaskTitle)
+                        Button(action: {
+                            taskStore.addTask(title: newTaskTitle)
+                            newTaskTitle = ""
+                        }) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title)
+                        }
+                    }
+                }
+                
+                Section(header: Text("Мои задачи")) {
+                    ForEach(taskStore.tasks) { task in
+                        HStack {
+                            Button(action: {
+                                taskStore.toggleTaskCompletion(task: task)
+                            }) {
+                                Image(systemName: task.isCompleted ? "checkmark.square.fill" : "square")
+                                    .foregroundColor(task.isCompleted ? .green : .primary)
+                            }
+                            Text(task.title)
+                                .strikethrough(task.isCompleted)
+                            Spacer()
+                        }
+                    }
+                    .onDelete(perform: taskStore.removeTask) 
+                }
+            }
+            .listStyle(GroupedListStyle())
+            .navigationBarTitle("Список задач")
+            .navigationBarItems(trailing: EditButton())
+        }
+    }
+}
+
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+    }
 }
